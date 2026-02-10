@@ -1,28 +1,70 @@
-
 name: CI/CD Pipeline node.js
 
 on:
- push:
-   branches: [ "main" ]
- pull_request:
-   branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # Permet de lancer le workflow manuellement depuis l'interface GitHub
+  workflow_dispatch:
+
+# Permissions nécessaires pour le déploiement GitHub Pages via Token
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Configuration de la concurrence pour éviter que des déploiements se chevauchent
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
- build:
+  # Job 1 : Build et Test (CI)
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - run: npm ci
+      # Si vous aviez une étape de build (ex: webpack), elle irait ici
+      # - run: npm run build --if-present
+      - run: npm test
 
-   runs-on: ubuntu-latest
-
-   strategy:
-     matrix:
-       node-version: [18.x, 20.x, 22.x]
-   steps:
-     - uses: actions/checkout@v4
-     - name: Use Node.js ${{ matrix.node-version }}
-       uses: actions/setup-node@v4
-       with:
-         node-version: ${{ matrix.node-version }}
-         cache: 'npm'
-     - run: npm ci
-     - run: npm run build --if-present
-     - run: npm test
-
+  # Job 2 : Déploiement (CD) - Uniquement si les tests passent
+  deploy:
+    # Ce job nécessite que 'build-and-test' soit fini avec succès
+    needs: build-and-test
+    
+    # On ne déploie que si on est sur la branche 'main' (pas sur les PR)
+    if: github.ref == 'refs/heads/main'
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+        
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Le chemin du dossier à déployer ('.' pour la racine car index.html est là)
+          path: '.'
+          
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
